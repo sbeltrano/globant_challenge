@@ -1,8 +1,13 @@
+# insert_csv.py
 from flask import Flask, request, jsonify
 from flask_uploads import UploadSet, configure_uploads, DATA
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.datastructures import FileStorage
 import os
+import csv
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
 app = Flask(__name__)
@@ -10,7 +15,7 @@ app = Flask(__name__)
 # Configure the SQLite database URI. This will create a database file named 'globant_challenge.db'.
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///globant_challenge.db'
 
-# Determine the absolute path to the directory containing your app.py file
+# Determine the absolute path to the directory containing app.py file
 app_directory = os.path.dirname(os.path.abspath(__file__))
 
 # Configure the destination folder for uploaded files (uploads folder in the app directory)
@@ -55,30 +60,36 @@ def hello_world():
 
 @app.route('/upload-csv', methods=['POST'])
 def upload_csv():
+    try:
+        print("Request received!")
 
-    print("Request received!")
+        if 'csv' in request.files:
+            csv_file = request.files['csv']
 
-    if 'csv' in request.files:
-        csv_file = request.files['csv']
+            if csv_file.filename == '':
+                return jsonify({'error': 'No file selected.'}), 400
 
-        if csv_file.filename == '':
-            return jsonify({'error': 'No file selected.'}), 400
+            if not csv_file.filename.endswith('.csv'):
+                return jsonify({'error': 'Invalid file format. Please upload a CSV file.'}), 400
 
-        if not csv_file.filename.endswith('.csv'):
-            return jsonify({'error': 'Invalid file format. Please upload a CSV file.'}), 400
-
-        try:
-            # Save the uploaded CSV file
-            filename = csv_file.filename  # Use the original filename
-            csv_file.save(os.path.join(os.path.join(app_directory, 'uploads'), filename))
-            print(f"CSV file saved as {filename}")
-
-            return jsonify({'message': 'CSV file uploaded and data inserted successfully.'}), 200
-        except Exception as e:
-            print(f"Error: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-    else:
-        return jsonify({'error': 'No CSV file provided in the request.'}), 400
+            try:
+                # Save the uploaded CSV file
+                filename = csv_file.filename  # Use the original filename
+                csv_file.save(os.path.join(os.path.join(app_directory, 'uploads'), filename))
+                print(f"CSV file saved as {filename}")
+                #Execute other functions
+                exec(open('./Functions/insert_csv.py').read())  # Execute the contents of insert_csv.py
+                insert_file(os.path.join(os.path.join(app_directory, 'uploads'), filename))
+                return jsonify({'message': 'CSV file uploaded and data inserted successfully.'}), 200
+            except Exception as e:
+                print(f"Error: {str(e)}")
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify({'error': 'No CSV file provided in the request.'}), 400
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
+    
