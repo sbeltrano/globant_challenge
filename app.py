@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
+# insert_csv.py
 app = Flask(__name__)
 
 # Configure the SQLite database URI. This will create a database file named 'globant_challenge.db'.
@@ -17,7 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///globant_challenge.db'
 
 # Determine the absolute path to the directory containing app.py file
 app_directory = os.path.dirname(os.path.abspath(__file__))
-
+print(app_directory)
 # Configure the destination folder for uploaded files (uploads folder in the app directory)
 app.config['UPLOADED_CSV_DEST'] = os.path.join(app_directory, 'uploads')
 
@@ -54,6 +55,9 @@ with app.app_context():
 
 app = Flask(__name__)
 
+#Execute other functions
+exec(open('./instance/insert_csv.py').read())  # Execute the contents of insert_csv.py
+
 @app.route('/')
 def hello_world():
     return 'Santiago Beltrán, Globant Challenge'
@@ -71,15 +75,25 @@ def upload_csv():
 
             if not csv_file.filename.endswith('.csv'):
                 return jsonify({'error': 'Invalid file format. Please upload a CSV file.'}), 400
+            
+            if not csv_file.filename.endswith('.csv'):
+                return jsonify({'error': 'Invalid file format. Please upload a CSV file.'}), 400
+            
+            if csv_file.filename not in ["departments.csv","hired_employees.csv","jobs.csv"]:
+                return jsonify({'error': 'Invalid filename format. Please upload a file with the name departments, hired_employees or jobs '}), 400
 
             try:
                 # Save the uploaded CSV file
                 filename = csv_file.filename  # Use the original filename
                 csv_file.save(os.path.join(os.path.join(app_directory, 'uploads'), filename))
                 print(f"CSV file saved as {filename}")
-                #Execute other functions
-                exec(open('./Functions/insert_csv.py').read())  # Execute the contents of insert_csv.py
-                insert_file(os.path.join(os.path.join(app_directory, 'uploads'), filename))
+                if filename == "departments.csv":
+                    insert_file(os.path.join(os.path.join(app_directory, 'uploads'), filename), filename, Department)
+                elif filename == "hired_employees.csv":
+                    insert_file(os.path.join(os.path.join(app_directory, 'uploads'), filename), filename, Employee)
+                elif filename == "jobs.csv":
+                    insert_file(os.path.join(os.path.join(app_directory, 'uploads'), filename), filename, Job)
+                
                 return jsonify({'message': 'CSV file uploaded and data inserted successfully.'}), 200
             except Exception as e:
                 print(f"Error: {str(e)}")
