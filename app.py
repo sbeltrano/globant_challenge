@@ -5,10 +5,11 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.datastructures import FileStorage
 import os
 import csv
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, func, extract, desc
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
+from sqlalchemy.sql.expression import cast
 
 # insert_csv.py
 app = Flask(__name__)
@@ -40,12 +41,12 @@ class Department(db.Model):
 
 class Job(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(128), nullable=False)
+    job = db.Column(db.String(128), nullable=False)
 
 class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False)
-    date = db.Column(db.DateTime, nullable=True)
+    datetime = db.Column(db.DateTime, nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=True)
     job_id = db.Column(db.Integer, db.ForeignKey('job.id'), nullable=True)
 
@@ -103,6 +104,169 @@ def upload_csv():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/departments_hired_more_than_mean', methods=['GET'])
+def get_departments_hired_more_than_mean():
+    try:
+        engine = create_engine('sqlite:///instance/globant_challenge.db')
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        # Calculate the mean number of employees hired in 2021 for all departments
+        employees_per_department_2021 = (
+            session.query(
+                Department.name.label('Department_Name'),
+                func.count().label('Num_Employees_Hired')
+            )
+            .join(Employee, Employee.department_id == Department.id)
+            .filter(
+                extract('year', Employee.datetime) == 2021
+            )
+            .group_by(Department.id, Department.name)
+            .all()
+        )
+
+        # Calculate the mean of Num_Employees_Hired
+        total_employees = 0
+        num_departments = 0
+        for department in employees_per_department_2021:
+            total_employees += department.Num_Employees_Hired
+            num_departments += 1
+        
+        mean_employees_hired = total_employees / num_departments
+
+        # Query to get departments that hired more employees than the mean in 2021
+        departments_above_mean = (
+            session.query(
+                Department.id,
+                Department.name,
+                func.count().label('num_employees_hired')
+            )
+            .join(Employee, Employee.department_id == Department.id)
+            .filter(
+                extract('year', Employee.datetime) == 2021
+            )
+            .group_by(
+                Department.id,
+                Department.name
+            )
+            .having(func.count() > mean_employees_hired)
+            .order_by(desc('num_employees_hired'))
+            .all()
+        )
+        
+        # Create a list of dictionaries for the response
+        response_data = []
+        for department in departments_above_mean:
+            department_id = department[0]
+            department_name = department[1]
+            num_employees_hired = department[2]
+            
+            response_row = {
+                'id': department_id,
+                'department': department_name,
+                'hired': num_employees_hired
+            }
+            response_data.append(response_row)
+        
+        return jsonify(response_data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+    
+@app.route('/employee_hires_2021', methods=['GET'])
+def get_employee_hires_2021():
+    try:
+        engine = create_engine('sqlite:///instance/globant_challenge.db')
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        # Query to get the number of employees hired by department and job in 2021 divided by quarter
+        query = (
+            session.query(
+                Department.name.label('department'),
+                Job.job.label('job'),
+                (
+                    'Q' +
+                    (
+                        (func.extract('month', Employee.datetime) - 1) / 3 + 1
+                    ).cast(Integer).cast(String)
+                ).label('quarter'),
+                func.count().label('num_employees')
+            )
+            .join(Department, Employee.department_id == Department.id)
+            .join(Job, Employee.job_id == Job.id)
+            .filter(
+                extract('year', Employee.datetime) == 2021
+            )
+            .group_by(
+                Department.name,
+                Job.job,
+                'quarter'
+            )
+            .order_by(
+                Department.name,
+                Job.job,
+                'quarter'
+            )
+        )
+        
+        # Execute the query and fetch the results
+        results = query.all()
+        
+        # Create a dictionary to organize the data in the desired format
+        formatted_data = {}
+        for result in results:
+            department_name = result[0]
+            job_name = result[1]
+            quarter = result[2]
+            num_employees = result[3]
+            
+            # Initialize the department entry if it doesn't exist
+            if department_name not in formatted_data:
+                formatted_data[department_name] = {}
+            
+            # Initialize the job entry if it doesn't exist
+            if job_name not in formatted_data[department_name]:
+                formatted_data[department_name][job_name] = {'Q1': 0, 'Q2': 0, 'Q3': 0, 'Q4': 0}
+            
+            # Update the count for the corresponding quarter
+            formatted_data[department_name][job_name][quarter] = num_employees
+        
+        
+        # Create a list of dictionaries for the response
+        response_data = []
+        for department_name, department_data in formatted_data.items():
+            for job_name, job_data in department_data.items():
+                response_row = {
+                    'Department_n': department_name,
+                    'Job_n': job_name,
+                    'Q1': job_data['Q1'],
+                    'Q2': job_data['Q2'],
+                    'Q3': job_data['Q3'],
+                    'Q4': job_data['Q4']
+                }
+                response_data.append(response_row)
+        
+        newResponseData = []
+        for item in response_data:
+                if not(item['Q1'] == 0 and item['Q2'] == 0 and item['Q3'] == 0 and item['Q4'] == 0):
+                    response_row = {
+                        'Department': item['Department_n'],
+                        'E': '',  # Empty second column
+                        'Job': item['Job_n'],
+                        'Q1': item['Q1'],
+                        'Q2': item['Q2'],
+                        'Q3': item['Q3'],
+                        'Q4': item['Q4']
+                    }
+                    newResponseData.append(response_row)
+        
+        return jsonify(newResponseData), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
 
 if __name__ == '__main__':
     app.run(debug=True)
